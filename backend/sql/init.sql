@@ -1,0 +1,2 @@
+-- 此文件仅作参考。数据库表会在应用启动时自动创建。
+-- SQLite 版本的建表语句已内置在 backend/src/config/database.js 的 initDatabase() 中。
