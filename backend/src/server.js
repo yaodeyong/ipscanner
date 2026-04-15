@@ -4,7 +4,9 @@ const { initDatabase } = require("./config/database");
 
 (async () => {
   await initDatabase();
-  app.listen(env.port, () => {
+  const server = app.listen(env.port, () => {
     console.log(`[ipscanner-backend] listening on port ${env.port}`);
   });
+  server.timeout = 180000;
+  server.headersTimeout = 185000;
 })();

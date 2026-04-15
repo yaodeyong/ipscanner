@@ -1,5 +1,6 @@
 const { sequelize } = require("../config/database");
 const { writeLog } = require("./log.controller");
+const { orderByIpv4NumericAsc } = require("../utils/ip-sql");
 
 async function listConflicts(req, res, next) {
   try {
@@ -32,7 +33,7 @@ async function listConflicts(req, res, next) {
           c.resolution_note
        FROM conflicts c
        ${whereClause}
-       ORDER BY c.resolved ASC, c.last_detected DESC`,
+       ORDER BY c.resolved ASC, ${orderByIpv4NumericAsc("c")}, c.last_detected DESC`,
       { replacements }
     );
 

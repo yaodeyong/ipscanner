@@ -5,11 +5,13 @@ import {
   WarningOutlined,
   FileTextOutlined,
   SettingOutlined,
+  ToolOutlined,
 } from "@ant-design/icons";
 import OverviewPage from "./pages/OverviewPage";
 import ConflictsPage from "./pages/ConflictsPage";
 import LogsPage from "./pages/LogsPage";
 import SettingsPage from "./pages/SettingsPage";
+import NetworkTroubleshootPage from "./pages/NetworkTroubleshootPage";
 
 const { Header, Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -18,6 +20,7 @@ const menuItems = [
   { key: "overview", icon: <LaptopOutlined />, label: "IP 地址总览" },
   { key: "conflicts", icon: <WarningOutlined />, label: "冲突列表" },
   { key: "logs", icon: <FileTextOutlined />, label: "日志查询" },
+  { key: "net-troubleshoot", icon: <ToolOutlined />, label: "网络排障" },
   { key: "settings", icon: <SettingOutlined />, label: "系统设置" },
 ];
 
@@ -25,6 +28,7 @@ const pageComponents = {
   overview: OverviewPage,
   conflicts: ConflictsPage,
   logs: LogsPage,
+  "net-troubleshoot": NetworkTroubleshootPage,
   settings: SettingsPage,
 };
 

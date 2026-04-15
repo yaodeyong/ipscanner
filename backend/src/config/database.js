@@ -87,6 +87,29 @@ async function initDatabase() {
       vendor VARCHAR(100) NOT NULL
     )
   `);
+
+  await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS network_diag_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT,
+      generated_at DATETIME,
+      hostname TEXT,
+      platform TEXT,
+      proxy TEXT,
+      tests_json TEXT,
+      hints_json TEXT,
+      routes_json TEXT,
+      gateways_json TEXT,
+      adapters_json TEXT,
+      interfaces_json TEXT,
+      text_report TEXT,
+      created_at DATETIME NOT NULL DEFAULT (datetime('now','localtime'))
+    )
+  `);
+
+  await sequelize.query(`
+    CREATE INDEX IF NOT EXISTS idx_network_diag_created_at ON network_diag_reports(created_at DESC)
+  `);
 }
 
 async function testDatabaseConnection() {

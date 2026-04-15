@@ -5,6 +5,7 @@ const net = require("net");
 const http = require("http");
 const https = require("https");
 const { sequelize } = require("../config/database");
+const env = require("../config/env");
 
 const execAsync = promisify(exec);
 const vendorCache = new Map();
@@ -388,19 +389,24 @@ function getCandidateSubnets() {
       prefixes.add(`${parts[0]}.${parts[1]}.${parts[2]}`);
     });
 
+  for (const p of env.scan.subnetPrefixes) {
+    prefixes.add(p);
+  }
+
   return Array.from(prefixes);
 }
 
-async function pingSweep(prefix, timeoutMs = 150) {
+async function pingSweep(prefix, timeoutMs) {
+  const wait = timeoutMs ?? env.scan.pingTimeoutMs;
   const ips = Array.from({ length: 254 }, (_, i) => `${prefix}.${i + 1}`);
-  const batchSize = 48;
+  const batchSize = env.scan.pingBatchSize;
 
   for (let i = 0; i < ips.length; i += batchSize) {
     const batch = ips.slice(i, i + batchSize);
     await Promise.all(
       batch.map(async (ip) => {
         try {
-          await execAsync(`ping -n 1 -w ${timeoutMs} ${ip} >nul`);
+          await execAsync(`ping -n 1 -w ${wait} ${ip} >nul`);
         } catch (error) {
           // Ignore unreachable targets; this pass only warms ARP table.
         }
@@ -411,16 +417,23 @@ async function pingSweep(prefix, timeoutMs = 150) {
 
 async function warmArpCache() {
   const subnets = getCandidateSubnets();
+  if (!subnets.length) return;
   for (const prefix of subnets) {
-    await pingSweep(prefix);
+    await pingSweep(prefix, env.scan.pingTimeoutMs);
   }
 }
 
 async function runNetworkScan() {
+  // 始终先对候选 /24 做 ping 预热（旧逻辑仅在 ARP 为空时才预热，会导致「已有网关等几条 ARP
+  // 就跳过整段」，大量同网段主机永远进不了 ARP，MAC 缺失且被误判离线）。
+  if (!env.scan.skipWarm) {
+    await warmArpCache();
+  }
+
   let { stdout } = await execAsync("arp -a");
   let devices = parseArpOutput(stdout || "");
 
-  if (!devices.length) {
+  if (!devices.length && !env.scan.skipWarm) {
     await warmArpCache();
     ({ stdout } = await execAsync("arp -a"));
     devices = parseArpOutput(stdout || "");

@@ -5,13 +5,13 @@ import {
   Form,
   Input,
   Modal,
+  Select,
   Space,
   Table,
   Tag,
 } from "antd";
 import {
   SyncOutlined,
-  SearchOutlined,
   DownloadOutlined,
 } from "@ant-design/icons";
 import axios from "axios";
@@ -30,10 +30,27 @@ function ipToNumber(ip) {
   return parts[0] * 256 ** 3 + parts[1] * 256 ** 2 + parts[2] * 256 + parts[3];
 }
 
+function normalizeMacStr(mac) {
+  return String(mac || "")
+    .replace(/[^0-9a-fA-F]/g, "")
+    .toUpperCase();
+}
+
+/** 冲突记录里除「当前分配 MAC」外的其它 MAC，用于展开行展示 */
+function getConflictExtraMacs(record) {
+  if (record.display_status !== "conflict" || !record.conflict_macs) return [];
+  const assigned = normalizeMacStr(record.assigned_mac);
+  return String(record.conflict_macs)
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .filter((mac) => normalizeMacStr(mac) !== assigned);
+}
+
 export default function OverviewPage() {
   const [healthText, setHealthText] = useState("尚未检测后端连接");
   const [rows, setRows] = useState([]);
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 50, total: 0 });
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 200, total: 0 });
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [summary, setSummary] = useState({ totalDevices: 0, onlineDevices: 0, offlineDevices: 0, conflictDevices: 0 });
@@ -41,51 +58,51 @@ export default function OverviewPage() {
   const [editForm] = Form.useForm();
   const [scanPreview, setScanPreview] = useState({ open: false, changes: [] });
   const [selectedRowKeys, setSelectedRowKeys] = useState([]);
-
-  const getTextSearchColumn = (dataIndex, placeholder) => ({
-    filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }) => (
-      <div style={{ padding: 8 }}>
-        <Input
-          placeholder={`搜索${placeholder}`}
-          value={selectedKeys[0]}
-          onChange={(e) => setSelectedKeys(e.target.value ? [e.target.value] : [])}
-          onPressEnter={() => confirm()}
-          style={{ marginBottom: 8, display: "block", width: 180 }}
-        />
-        <Space>
-          <Button type="primary" size="small" icon={<SearchOutlined />} onClick={() => confirm()}>搜索</Button>
-          <Button size="small" onClick={() => { clearFilters?.(); confirm(); }}>重置</Button>
-        </Space>
-      </div>
-    ),
-    onFilter: (value, record) => String(record[dataIndex] || "").toLowerCase().includes(String(value).toLowerCase()),
-    filterIcon: (filtered) => <SearchOutlined style={{ color: filtered ? "#1677ff" : undefined }} />,
-  });
+  /** 与后端 /api/ips 查询参数一致，避免表格列「前端过滤」导致本页不足 50 条却仍显示多页 */
+  const [listFilters, setListFilters] = useState({ ip: "", mac: "", status: "" });
 
   const tableColumns = [
     { title: "序号", key: "index", width: 50, render: (_, __, index) => (pagination.current - 1) * pagination.pageSize + index + 1 },
-    { title: "IP 地址", dataIndex: "ip_address", key: "ip_address", width: 120, sorter: (a, b) => ipToNumber(a.ip_address) - ipToNumber(b.ip_address), sortDirections: ["ascend", "descend"], ...getTextSearchColumn("ip_address", "IP 地址") },
     {
-      title: "状态", dataIndex: "display_status", key: "display_status", width: 60,
-      filters: [{ text: "在线", value: "online" }, { text: "离线", value: "offline" }, { text: "冲突", value: "conflict" }],
-      onFilter: (value, record) => record.display_status === value,
+      title: "IP 地址",
+      dataIndex: "ip_address",
+      key: "ip_address",
+      width: 120,
+      defaultSortOrder: "ascend",
+      sorter: (a, b) => ipToNumber(a.ip_address) - ipToNumber(b.ip_address),
+      sortDirections: ["ascend", "descend"],
+    },
+    {
+      title: "状态",
+      dataIndex: "display_status",
+      key: "display_status",
+      width: 60,
       render: (status) => {
         if (status === "online") return <Tag color="green">在线</Tag>;
         if (status === "conflict") return <Tag color="red">冲突</Tag>;
         return <Tag>离线</Tag>;
       },
     },
-    { title: "名称", dataIndex: "hostname", key: "hostname", width: 180, ...getTextSearchColumn("hostname", "名称") },
-    { title: "制造商", dataIndex: "vendor", key: "vendor", width: 250, sorter: (a, b) => String(a.vendor || "").localeCompare(String(b.vendor || ""), "zh-CN"), sortDirections: ["ascend", "descend"], ...getTextSearchColumn("vendor", "制造商") },
-    { title: "MAC 地址", dataIndex: "assigned_mac", key: "assigned_mac", width: 150, ...getTextSearchColumn("assigned_mac", "MAC 地址") },
-    { title: "部门", dataIndex: "department", key: "department", ...getTextSearchColumn("department", "部门") },
-    { title: "用户", dataIndex: "owner_user", key: "owner_user", ...getTextSearchColumn("owner_user", "用户") },
-    { title: "备注", dataIndex: "note", key: "note", ...getTextSearchColumn("note", "备注") },
+    { title: "名称", dataIndex: "hostname", key: "hostname", width: 180 },
+    {
+      title: "制造商",
+      dataIndex: "vendor",
+      key: "vendor",
+      width: 250,
+      sorter: (a, b) => String(a.vendor || "").localeCompare(String(b.vendor || ""), "zh-CN"),
+      sortDirections: ["ascend", "descend"],
+    },
+    { title: "MAC 地址", dataIndex: "assigned_mac", key: "assigned_mac", width: 150 },
+    { title: "部门", dataIndex: "department", key: "department" },
+    { title: "用户", dataIndex: "owner_user", key: "owner_user" },
+    { title: "备注", dataIndex: "note", key: "note" },
     { title: "最后在线时间", dataIndex: "last_online", key: "last_online", render: (value) => formatDateTime(value) },
     {
-      title: "操作", key: "actions", width: 88,
+      title: "操作",
+      key: "actions",
+      width: 88,
       render: (_, record) => (
-        <Button size="small" disabled={record.synthetic} onClick={() => {
+        <Button size="small" onClick={() => {
           setEditingRow(record);
           editForm.setFieldsValue({ department: record.department || "", owner_user: record.owner_user || "", note: record.note || "" });
         }}>编辑</Button>
@@ -102,30 +119,23 @@ export default function OverviewPage() {
     }
   };
 
-  const loadIps = async (page = pagination.current, pageSize = pagination.pageSize) => {
+  const loadIps = async (page = pagination.current, pageSize = pagination.pageSize, filters = listFilters) => {
     setLoading(true);
     try {
-      const res = await axios.get("/api/ips", { params: { page, pageSize } });
+      const params = { page, pageSize };
+      const ip = String(filters.ip || "").trim();
+      const mac = String(filters.mac || "").trim();
+      const status = String(filters.status || "").trim();
+      if (ip) params.ip = ip;
+      if (mac) params.mac = mac;
+      if (status) params.status = status;
+
+      const res = await axios.get("/api/ips", { params });
       const payload = res.data?.data;
       const items = payload?.items || [];
       const total = payload?.pagination?.total || 0;
       const summaryData = payload?.summary || {};
-      const expandedRows = [];
-      for (const item of items) {
-        const base = { ...item, key: item.id, synthetic: false };
-        expandedRows.push(base);
-        if (item.display_status === "conflict" && item.conflict_macs) {
-          const macList = String(item.conflict_macs).split(",").map((v) => v.trim()).filter(Boolean);
-          const differentMacs = macList.filter((mac) => mac !== item.assigned_mac);
-          for (const mac of differentMacs) {
-            expandedRows.push({
-              ...item, key: `${item.id}-conflict-${mac}`, assigned_mac: mac,
-              hostname: "冲突设备（待处理）", vendor: item.vendor || "-", note: "来自冲突记录", synthetic: true,
-            });
-          }
-        }
-      }
-      setRows(expandedRows);
+      setRows(items.slice(0, pageSize).map((item) => ({ ...item, key: item.id })));
       setSummary({
         totalDevices: summaryData.totalDevices || 0,
         onlineDevices: summaryData.onlineDevices || 0,
@@ -138,6 +148,16 @@ export default function OverviewPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSearch = () => {
+    loadIps(1, pagination.pageSize, listFilters);
+  };
+
+  const handleResetFilters = () => {
+    const empty = { ip: "", mac: "", status: "" };
+    setListFilters(empty);
+    loadIps(1, pagination.pageSize, empty);
   };
 
   const handleManualScan = async () => {
@@ -176,8 +196,11 @@ export default function OverviewPage() {
     if (!editingRow) return;
     const values = await editForm.validateFields();
     await axios.put(`/api/ips/${editingRow.ip_address}`, {
-      assigned_mac: editingRow.assigned_mac, status: editingRow.status,
-      note: values.note || null, department: values.department || null, owner_user: values.owner_user || null,
+      assigned_mac: editingRow.assigned_mac,
+      status: editingRow.status,
+      note: values.note || null,
+      department: values.department || null,
+      owner_user: values.owner_user || null,
     });
     setEditingRow(null);
     await loadIps(pagination.current, pagination.pageSize);
@@ -185,7 +208,7 @@ export default function OverviewPage() {
 
   useEffect(() => {
     checkBackend();
-    loadIps(1, 50);
+    loadIps(1, 200, { ip: "", mac: "", status: "" });
   }, []);
 
   return (
@@ -202,7 +225,44 @@ export default function OverviewPage() {
         </Space>
       </div>
 
-      <Alert message={healthText} type="info" showIcon style={{ marginBottom: 16 }} />
+      <Alert title={healthText} type="info" showIcon style={{ marginBottom: 16 }} />
+
+      <div style={{ marginBottom: 12, padding: "10px 12px", background: "#fafafa", borderRadius: 8, border: "1px solid #f0f0f0" }}>
+        <Space wrap align="center">
+          <span style={{ color: "#666", marginRight: 4 }}>筛选（走后端分页）：</span>
+          <Input
+            allowClear
+            placeholder="IP 模糊"
+            style={{ width: 160 }}
+            value={listFilters.ip}
+            onChange={(e) => setListFilters((f) => ({ ...f, ip: e.target.value }))}
+            onPressEnter={handleSearch}
+          />
+          <Input
+            allowClear
+            placeholder="MAC 模糊"
+            style={{ width: 180 }}
+            value={listFilters.mac}
+            onChange={(e) => setListFilters((f) => ({ ...f, mac: e.target.value }))}
+            onPressEnter={handleSearch}
+          />
+          <Select
+            allowClear
+            placeholder="库内状态"
+            style={{ width: 140 }}
+            value={listFilters.status || undefined}
+            onChange={(v) => setListFilters((f) => ({ ...f, status: v || "" }))}
+            options={[
+              { value: "free", label: "free 空闲" },
+              { value: "assigned", label: "assigned 已分配" },
+              { value: "conflict", label: "conflict 冲突" },
+              { value: "unknown", label: "unknown 未知" },
+            ]}
+          />
+          <Button type="primary" onClick={handleSearch}>查询</Button>
+          <Button onClick={handleResetFilters}>重置</Button>
+        </Space>
+      </div>
 
       <div className="table-scroll-wrap">
         <Table
@@ -212,9 +272,31 @@ export default function OverviewPage() {
           loading={loading}
           scroll={{ x: "max-content", y: "calc(100vh - 300px)" }}
           pagination={{
-            ...pagination, showSizeChanger: true,
-            pageSizeOptions: ["20", "50", "100", "200"],
-            showTotal: (total) => `共 ${total} 条`,
+            ...pagination,
+            showSizeChanger: true,
+            pageSizeOptions: ["50", "100", "200", "500"],
+            showQuickJumper: true,
+            showTotal: (total) => `共 ${total} 条（当前每页 ${pagination.pageSize} 条）`,
+          }}
+          expandable={{
+            rowExpandable: (record) => getConflictExtraMacs(record).length > 0,
+            expandedRowRender: (record) => {
+              const extras = getConflictExtraMacs(record);
+              if (!extras.length) return null;
+              return (
+                <div style={{ padding: "8px 48px 12px", background: "#fff7e6", borderRadius: 4 }}>
+                  <div style={{ marginBottom: 8, color: "#d46b08", fontWeight: 500 }}>冲突中的其它 MAC（待处理）</div>
+                  <Space orientation="vertical" size={6} style={{ width: "100%" }}>
+                    {extras.map((mac) => (
+                      <div key={mac} style={{ fontSize: 13 }}>
+                        <Tag color="orange">{mac}</Tag>
+                        <span style={{ color: "#666" }}>冲突设备（待处理） · 来自冲突记录</span>
+                      </div>
+                    ))}
+                  </Space>
+                </div>
+              );
+            },
           }}
           rowSelection={{ selectedRowKeys, onChange: (keys) => setSelectedRowKeys(keys) }}
           onChange={(next, _filters, _sorter, extra) => {
@@ -225,28 +307,48 @@ export default function OverviewPage() {
       </div>
 
       <Modal
-        open={scanPreview.open} title="扫描结果差异预览"
+        open={scanPreview.open}
+        title="扫描结果差异预览"
         onCancel={() => setScanPreview({ open: false, changes: [] })}
-        onOk={applyScanChanges} okText="确认写入数据库" cancelText="取消" confirmLoading={scanning} width={900}
+        onOk={applyScanChanges}
+        okText="确认写入数据库"
+        cancelText="取消"
+        confirmLoading={scanning}
+        width={1200}
       >
-        <Table size="small" rowKey={(row) => `${row.type}-${row.ip}-${row.mac}`} pagination={false}
+        <Table
+          size="small"
+          rowKey={(row) => `${row.type}-${row.ip}-${row.mac}`}
+          pagination={false}
           dataSource={scanPreview.changes}
+          scroll={{ x: "max-content" }}
           columns={[
-            { title: "类型", dataIndex: "type", key: "type", render: (v) => v === "new" ? "新增设备" : v === "mac_changed" ? "MAC变更" : v === "meta_changed" ? "名称/制造商变更" : v },
-            { title: "IP", dataIndex: "ip", key: "ip" },
-            { title: "当前MAC", dataIndex: "mac", key: "mac" },
-            { title: "原MAC", dataIndex: "previousMac", key: "previousMac" },
-            { title: "原名称", dataIndex: "previousHostname", key: "previousHostname" },
-            { title: "原制造商", dataIndex: "previousVendor", key: "previousVendor" },
-            { title: "名称", dataIndex: "hostname", key: "hostname" },
-            { title: "制造商", dataIndex: "vendor", key: "vendor" },
-            { title: "说明", dataIndex: "message", key: "message" },
+            {
+              title: "类型",
+              dataIndex: "type",
+              key: "type",
+              width: 160,
+              render: (v) => (v === "new" ? "新增设备" : v === "mac_changed" ? "MAC变更" : v === "meta_changed" ? "名称/制造商变更" : v),
+            },
+            { title: "IP", dataIndex: "ip", key: "ip", width: 120 },
+            { title: "当前MAC", dataIndex: "mac", key: "mac", width: 150 },
+            { title: "原MAC", dataIndex: "previousMac", key: "previousMac", width: 150 },
+            { title: "原名称", dataIndex: "previousHostname", key: "previousHostname", width: 140 },
+            { title: "原制造商", dataIndex: "previousVendor", key: "previousVendor", width: 160 },
+            { title: "名称", dataIndex: "hostname", key: "hostname", width: 140 },
+            { title: "制造商", dataIndex: "vendor", key: "vendor", width: 160 },
+            { title: "说明", dataIndex: "message", key: "message", width: 220, ellipsis: true },
           ]}
         />
       </Modal>
 
-      <Modal open={!!editingRow} title={`编辑 ${editingRow?.ip_address || ""}`}
-        onCancel={() => setEditingRow(null)} onOk={handleSaveRowEdit} okText="保存" cancelText="取消"
+      <Modal
+        open={!!editingRow}
+        title={`编辑 ${editingRow?.ip_address || ""}`}
+        onCancel={() => setEditingRow(null)}
+        onOk={handleSaveRowEdit}
+        okText="保存"
+        cancelText="取消"
       >
         <Form form={editForm} layout="vertical">
           <Form.Item label="部门" name="department"><Input placeholder="请输入部门" /></Form.Item>

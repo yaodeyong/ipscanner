@@ -1,17 +1,34 @@
 import { useEffect, useState } from "react";
-import { Button, Card, Descriptions, Modal, Statistic, Row, Col, Space, message } from "antd";
+import {
+  Button,
+  Card,
+  Descriptions,
+  Modal,
+  Statistic,
+  Row,
+  Col,
+  Space,
+  message,
+  Spin,
+  Table,
+  Typography,
+} from "antd";
 import {
   DatabaseOutlined,
   ClockCircleOutlined,
   DeleteOutlined,
   CloudDownloadOutlined,
+  RadarChartOutlined,
 } from "@ant-design/icons";
 import axios from "axios";
+
+const { Paragraph, Text } = Typography;
 
 export default function SettingsPage() {
   const [info, setInfo] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [importingOui, setImportingOui] = useState(false);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagResult, setDiagResult] = useState(null);
 
   const loadInfo = async () => {
     setLoading(true);
@@ -22,6 +39,20 @@ export default function SettingsPage() {
       message.error("获取系统信息失败");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runNetworkDiag = async () => {
+    setDiagLoading(true);
+    setDiagResult(null);
+    try {
+      const res = await axios.get("/api/system/network-diag", { timeout: 180000 });
+      setDiagResult(res.data?.data || null);
+      message.success("诊断完成");
+    } catch {
+      message.error("网络诊断失败或超时，请查看后端是否在运行");
+    } finally {
+      setDiagLoading(false);
     }
   };
 
@@ -62,8 +93,20 @@ export default function SettingsPage() {
 
   const counts = info?.counts || {};
 
+  const diagColumns = [
+    { title: "项目", dataIndex: "label", key: "label", ellipsis: true },
+    {
+      title: "结果",
+      dataIndex: "ok",
+      key: "ok",
+      width: 80,
+      render: (ok) => (ok ? <Text type="success">正常</Text> : <Text type="danger">异常</Text>),
+    },
+    { title: "摘要", dataIndex: "summary", key: "summary", width: 200 },
+  ];
+
   return (
-    <div style={{ maxWidth: 900 }}>
+    <div style={{ maxWidth: 1100 }}>
       <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
         <Col span={6}>
           <Card hoverable>
@@ -77,8 +120,12 @@ export default function SettingsPage() {
         </Col>
         <Col span={6}>
           <Card hoverable>
-            <Statistic title="未解决冲突" value={counts.unresolved_conflicts || 0} prefix={<DatabaseOutlined />}
-              valueStyle={counts.unresolved_conflicts > 0 ? { color: "#ff4d4f" } : undefined} />
+            <Statistic
+              title="未解决冲突"
+              value={counts.unresolved_conflicts || 0}
+              prefix={<DatabaseOutlined />}
+              {...(counts.unresolved_conflicts > 0 ? { styles: { content: { color: "#ff4d4f" } } } : {})}
+            />
           </Card>
         </Col>
         <Col span={6}>
@@ -103,8 +150,89 @@ export default function SettingsPage() {
         </Descriptions>
       </Card>
 
+      <Card
+        title="网络诊断"
+        style={{ marginBottom: 24 }}
+        extra={
+          <Button type="primary" icon={<RadarChartOutlined />} loading={diagLoading} onClick={runNetworkDiag}>
+            运行诊断（约 20～40 秒）
+          </Button>
+        }
+      >
+        <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+          与命令行 <Text code>npm run net:diag</Text> 使用相同逻辑；在「系统设置」页即可查看，便于插拔网线前后对比。
+          启动前后端请仍使用根目录 <Text code>npm run dev</Text>。
+        </Paragraph>
+        <Spin spinning={diagLoading} description="正在 ping / TCP / HTTPS 探测，请稍候…">
+          {!diagResult && !diagLoading ? (
+            <Text type="secondary">点击右上角按钮运行，结果将显示在下方。</Text>
+          ) : null}
+          {diagResult ? (
+            <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
+              <div>
+                <Text strong>生成时间：</Text>
+                {diagResult.generatedAtLocal || diagResult.generatedAt}
+                <Text type="secondary" style={{ marginLeft: 12 }}>
+                  {diagResult.hostname} · {diagResult.platform}
+                </Text>
+              </div>
+              {diagResult.proxy ? (
+                <Text type="warning">代理环境变量: {diagResult.proxy}</Text>
+              ) : (
+                <Text type="secondary">未检测到 HTTP(S)_PROXY（直连）</Text>
+              )}
+              <div>
+                <Text strong style={{ display: "block", marginBottom: 8 }}>本机 IPv4</Text>
+                <Table
+                  size="small"
+                  pagination={false}
+                  rowKey={(r) => `${r.name}-${r.address}`}
+                  dataSource={diagResult.interfaces || []}
+                  columns={[
+                    { title: "接口", dataIndex: "name", key: "name" },
+                    { title: "地址", dataIndex: "address", key: "address", width: 140 },
+                    { title: "掩码", dataIndex: "netmask", key: "netmask", width: 120 },
+                    { title: "MAC", dataIndex: "mac", key: "mac", ellipsis: true },
+                  ]}
+                />
+              </div>
+              <div>
+                <Text strong style={{ display: "block", marginBottom: 8 }}>探测摘要</Text>
+                <Table
+                  size="small"
+                  pagination={false}
+                  rowKey="label"
+                  dataSource={diagResult.tests || []}
+                  columns={diagColumns}
+                />
+              </div>
+              <div>
+                <Text strong style={{ display: "block", marginBottom: 8 }}>完整文本（可复制）</Text>
+                <Paragraph
+                  copyable
+                  style={{
+                    marginBottom: 0,
+                    maxHeight: 360,
+                    overflow: "auto",
+                    background: "#0d1117",
+                    color: "#c9d1d9",
+                    padding: 12,
+                    borderRadius: 8,
+                    fontFamily: "ui-monospace, Consolas, monospace",
+                    fontSize: 12,
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {diagResult.textReport}
+                </Paragraph>
+              </div>
+            </Space>
+          ) : null}
+        </Spin>
+      </Card>
+
       <Card title="数据维护">
-        <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+        <Space orientation="vertical" size="middle" style={{ width: "100%" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <div style={{ fontWeight: 500 }}>清空审计日志</div>

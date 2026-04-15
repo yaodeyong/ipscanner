@@ -1,5 +1,6 @@
 const { sequelize } = require("../config/database");
 const { writeLog } = require("./log.controller");
+const { orderByIpv4NumericAsc } = require("../utils/ip-sql");
 
 function normalizePage(value, defaultValue) {
   const n = Number(value);
@@ -65,7 +66,7 @@ async function listIps(req, res, next) {
          ) c2 ON c1.id = c2.max_id
        ) c ON c.ip_address = ipa.ip_address
        ${whereClause}
-       ORDER BY ipa.ip_address ASC
+       ORDER BY ${orderByIpv4NumericAsc("ipa")}
        LIMIT ${Number(pageSize)} OFFSET ${Number(offset)}`,
       { replacements }
     );
@@ -227,7 +228,7 @@ async function exportExcel(req, res, next) {
           ipa.last_online
        FROM ip_assignments ipa
        LEFT JOIN devices d ON d.mac = ipa.assigned_mac
-       ORDER BY ipa.ip_address ASC`
+       ORDER BY ${orderByIpv4NumericAsc("ipa")}`
     );
 
     const ExcelJS = require("exceljs");
